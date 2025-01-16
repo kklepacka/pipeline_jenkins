@@ -27,11 +27,39 @@ pipeline {
         stage('Wait for workflow to finish') {
             steps {
                 script {
-                    // Définir la commande de surveillance
+                    // Define the watch command
                     def watch_command = "opentf-ctl get workflow ${WORKFLOW_ID} --watch"
                     
-                    // Exécuter la commande de surveillance
-                    bat script: watch_command
+                    // Set up retry mechanism with timeout
+                    timeout(time: 60, unit: 'MINUTES') {  // Adjust timeout as needed
+                        retry(3) {  // Will retry up to 3 times
+                            try {
+                                // Execute with specific encoding to handle Unicode characters
+                                withEnv(['PYTHONIOENCODING=utf8']) {
+                                    bat script: """
+                                        @echo off
+                                        chcp 65001 > nul
+                                        ${watch_command}
+                                    """
+                                }
+                            } catch (Exception e) {
+                                // Check if workflow is actually complete despite the error
+                                def status_command = "opentf-ctl get workflow ${WORKFLOW_ID} --output json"
+                                def status = bat(script: status_command, returnStdout: true).trim()
+                                
+                                // If workflow is complete (status is success/failed/terminated), continue
+                                if (status.contains('"status": "completed"') || 
+                                    status.contains('"status": "failed"') || 
+                                    status.contains('"status": "terminated"')) {
+                                    echo "Workflow completed with status: ${status}"
+                                    return
+                                }
+                                
+                                // If workflow is still running, throw the error to trigger retry
+                                throw e
+                            }
+                        }
+                    }
                 }
             }
         }
