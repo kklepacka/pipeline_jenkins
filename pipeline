@@ -2,24 +2,23 @@ pipeline {
     agent any
     environment {
         WORKFLOW_ID = ''
-        OPENTF_RUN_Navigateur = 'firefox'
     }
     stages {
         stage('Run Workflow') {
             steps {
                 script {
-                    // Exécuter le workflow et capturer le résultat
-                    def workflow_command = 'opentf-ctl run workflow .opentf/suite_connexion.json'
+                    // Run the workflow and capture the result
+                    def workflow_command = 'opentf-ctl run workflow .opentf/suite_Admin_ref_unca_Carpa.json'
                     def workflow_result = bat(returnStdout: true, script: workflow_command).trim()
-                    echo "Résultat du workflow: ${workflow_result}"
+                    echo "Workflow result: ${workflow_result}"
 
-                    // Extraire le WORKFLOW_ID du résultat
+                    // Extract the WORKFLOW_ID from the result
                     def workflow_id_match = (workflow_result =~ /Workflow ([\w-]+)/)
                     if (workflow_id_match) {
                         WORKFLOW_ID = workflow_id_match[0][1].toString()
-                        echo "WORKFLOW_ID extrait: ${WORKFLOW_ID}"
+                        echo "Extracted WORKFLOW_ID: ${WORKFLOW_ID}"
                     } else {
-                        error("Échec de l'extraction du WORKFLOW_ID du résultat du workflow: ${workflow_result}")
+                        error("Failed to extract WORKFLOW_ID from workflow result: ${workflow_result}")
                     }
                 }
             }
@@ -66,7 +65,7 @@ pipeline {
         stage('Prepare Workspace') {
             steps {
                 script {
-                    // S'assurer que l'espace de travail est propre
+                    // Ensure the workspace is clean
                     bat 'if exist executionreport.html del executionreport.html'
                 }
             }
@@ -75,13 +74,37 @@ pipeline {
         stage('Get Attachments') {
             steps {
                 script {
-                    sleep(time: 20, unit: 'SECONDS') // Délai pour garantir que les fichiers sont disponibles
+                    def maxRetries = 5
+                    def retryDelay = 5 // seconds
+                    def success = false
                     def attach_html = "opentf-ctl cp ${WORKFLOW_ID}:*.html ."
-                    def attach_html_result = bat(returnStdout: true, script: attach_html).trim()
-                    echo "Résultat de la copie des pièces jointes: ${attach_html_result}"
+        
+                    for (int i = 1; i <= maxRetries; i++) {
+                        try {
+                            echo "Attempt ${i} of ${maxRetries}..."
+                            sleep(time: retryDelay, unit: 'SECONDS') // Ensure files are available
+        
+                            def attach_html_result = bat(returnStdout: true, script: attach_html).trim()
+                            echo "Attachments copy result: ${attach_html_result}"
+                            
+                            success = true
+                            break // Exit loop on success
+                        } catch (Exception e) {
+                            echo "Attempt ${i} failed: ${e.getMessage()}"
+                            if (i < maxRetries) {
+                                echo "Retrying in ${retryDelay} seconds..."
+                                sleep(time: retryDelay, unit: 'SECONDS')
+                            }
+                        }
+                    }
+        
+                    if (!success) {
+                        error("Failed to copy attachments after ${maxRetries} attempts.")
+                    }
                 }
             }
         }
+
 
         stage('Publish HTML Report') {
             steps {
@@ -91,8 +114,8 @@ pipeline {
                     keepAll: true,
                     reportDir: '.',
                     reportFiles: 'executionreport.html',
-                    reportName: 'Rapport de Test',
-                    reportTitles: 'Rapport d\'Exécution'
+                    reportName: 'Test Report',
+                    reportTitles: 'Execution Report'
                 ])
             }
         }
@@ -102,7 +125,7 @@ pipeline {
                 script {
                     def qg_command = "opentf-ctl get qualitygate ${WORKFLOW_ID} --mode strict"
                     def qg_result = bat(returnStdout: true, script: qg_command).trim()
-                    echo "Résultat de la Quality Gate: ${qg_result}"
+                    echo "Quality Gate result: ${qg_result}"
                 }
             }
         }
